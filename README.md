@@ -23,20 +23,18 @@ La ventana abre maximizada. Los botones **1) Generar CSV Moodle** y **2) Enviar 
 
 ### 1) Normaliza Excel → CSV Moodle
 
-La app lee la **primera hoja** del Excel con este formato:
+La app lee la **primera hoja** del Excel y busca sola la fila de encabezados dentro de las primeras 30 filas, en cualquier columna. Así acepta tanto nóminas con los títulos en la fila 1 como formularios con un encabezado previo (título, curso, fecha…). Las filas bajo los encabezados son los participantes; se omiten las que no tienen RUT o nombres.
 
-| Filas | Contenido |
+Columnas obligatorias (no importan mayúsculas, tildes ni espacios sobrantes; las demás columnas se ignoran):
+
+| Dato | Encabezados reconocidos |
 |---|---|
-| 1 – 4 | Encabezado del formulario (título, curso, fecha…). No se leen. |
-| 5 | Nombres de columna. |
-| 6 en adelante | Participantes. Se omiten las filas sin RUT o sin nombres. |
+| RUT | cualquiera que empiece con `RUT` (p. ej. `RUT`, `Rut (con punto y con guión)`) |
+| Nombres | `Nombres`, `Nombre` |
+| Apellidos | `Apellidos`, `Apellido` |
+| Correo | cualquiera que empiece con `Correo` (p. ej. `CORREO`, `Correo electrónico`), `Email`, `E-mail`, `Mail` |
 
-Columnas obligatorias (el nombre debe coincidir exactamente; las demás columnas se ignoran):
-
-- `Rut (con punto y con guión)`
-- `Nombres ` ← **con un espacio al final**
-- `Apellidos`
-- `Correo electrónico` (si la celda trae varios correos, se usa el primero)
+Si la celda de correo trae varios correos, se usa el primero. El RUT se copia tal como viene en la planilla (con o sin puntos).
 
 Con eso genera un CSV listo para importar en Moodle con:
 

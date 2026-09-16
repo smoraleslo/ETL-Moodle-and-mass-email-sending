@@ -402,6 +402,49 @@ def build_password(pattern: str, year: int, username: str, rut: str, email: str)
     return pwd
 
 
+HEADER_SEARCH_ROWS = 30
+
+# Columna interna -> reconoce el encabezado ya normalizado (minúsculas, sin tildes ni espacios extra)
+EXCEL_COLUMN_MATCHERS = {
+    "rut": lambda h: h.startswith("rut"),  # "RUT", "Rut (con punto y con guión)"
+    "nombres": lambda h: h in ("nombres", "nombre"),
+    "apellidos": lambda h: h in ("apellidos", "apellido"),
+    "email": lambda h: h.startswith("correo") or h in ("email", "e-mail", "mail"),
+}
+
+
+def normalize_header(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return " ".join(normalize_simple(str(value)).lower().split())
+
+
+def read_participants_excel(excel_path: str) -> pd.DataFrame:
+    """
+    Lee la primera hoja y busca la fila de encabezados en las primeras filas.
+    Devuelve las filas de datos con columnas: rut, nombres, apellidos, email.
+    """
+    raw = pd.read_excel(excel_path, sheet_name=0, header=None)
+
+    for row_idx in range(min(HEADER_SEARCH_ROWS, len(raw))):
+        headers = [normalize_header(v) for v in raw.iloc[row_idx]]
+        found = {}
+        for key, matches in EXCEL_COLUMN_MATCHERS.items():
+            col = next((i for i, h in enumerate(headers) if h and matches(h)), None)
+            if col is not None:
+                found[key] = col
+        if len(found) == len(EXCEL_COLUMN_MATCHERS):
+            data = raw.iloc[row_idx + 1:, list(found.values())].copy()
+            data.columns = list(found.keys())
+            return data
+
+    raise ValueError(
+        "No se encontró la fila de encabezados en el Excel.\n"
+        f"Se buscó en las primeras {HEADER_SEARCH_ROWS} filas de la primera hoja una fila con las columnas:\n"
+        "RUT, Nombres, Apellidos y Correo (sin importar mayúsculas, tildes ni espacios)."
+    )
+
+
 def normalize_excel_to_moodle_csv(
     excel_path: str,
     csv_output_path: str,
@@ -411,20 +454,10 @@ def normalize_excel_to_moodle_csv(
     password_pattern: str,
     password_year: int,
 ):
-    df = pd.read_excel(excel_path, sheet_name=0)
+    clean_df = read_participants_excel(excel_path)
 
-    header = df.iloc[3]
-    clean_df = df.iloc[4:].copy()
-    clean_df.columns = header.values
-
-    clean_df = clean_df.rename(columns={
-        "Rut (con punto y con guión)": "rut",
-        "Nombres ": "nombres",
-        "Apellidos": "apellidos",
-        "Correo electrónico": "email",
-    })
-
-    participants = clean_df[clean_df["rut"].notna() & clean_df["nombres"].notna()].copy()
+    has_value = lambda col: clean_df[col].notna() & (clean_df[col].astype(str).str.strip() != "")
+    participants = clean_df[has_value("rut") & has_value("nombres")].copy()
 
     moodle = pd.DataFrame()
     moodle["firstname"] = (
