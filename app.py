@@ -419,13 +419,8 @@ def normalize_header(value) -> str:
     return " ".join(normalize_simple(str(value)).lower().split())
 
 
-def read_participants_excel(excel_path: str) -> pd.DataFrame:
-    """
-    Lee la primera hoja y busca la fila de encabezados en las primeras filas.
-    Devuelve las filas de datos con columnas: rut, nombres, apellidos, email.
-    """
-    raw = pd.read_excel(excel_path, sheet_name=0, header=None)
-
+def find_header_row(raw: pd.DataFrame):
+    """Devuelve (índice de fila, {columna interna: índice de columna}) o (None, {})."""
     for row_idx in range(min(HEADER_SEARCH_ROWS, len(raw))):
         headers = [normalize_header(v) for v in raw.iloc[row_idx]]
         found = {}
@@ -434,15 +429,72 @@ def read_participants_excel(excel_path: str) -> pd.DataFrame:
             if col is not None:
                 found[key] = col
         if len(found) == len(EXCEL_COLUMN_MATCHERS):
-            data = raw.iloc[row_idx + 1:, list(found.values())].copy()
-            data.columns = list(found.keys())
-            return data
+            return row_idx, found
+    return None, {}
+
+
+def read_participants_excel(excel_path: str) -> pd.DataFrame:
+    """
+    Lee la primera hoja y busca la fila de encabezados en las primeras filas.
+    Devuelve las filas de datos con columnas: rut, nombres, apellidos, email.
+    """
+    raw = pd.read_excel(excel_path, sheet_name=0, header=None)
+
+    row_idx, found = find_header_row(raw)
+    if row_idx is not None:
+        data = raw.iloc[row_idx + 1:, list(found.values())].copy()
+        data.columns = list(found.keys())
+        return data
 
     raise ValueError(
         "No se encontró la fila de encabezados en el Excel.\n"
         f"Se buscó en las primeras {HEADER_SEARCH_ROWS} filas de la primera hoja una fila con las columnas:\n"
         "RUT, Nombres, Apellidos y Correo (sin importar mayúsculas, tildes ni espacios)."
     )
+
+
+def cell_text(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return " ".join(str(value).split())  # sin saltos de línea ni espacios dobles
+
+
+def format_table(df: pd.DataFrame, max_col_width: int = 40) -> str:
+    """Tabla de texto con columnas alineadas para las vistas previas."""
+    headers = [cell_text(c) for c in df.columns]
+    rows = [[cell_text(v) for v in row] for row in df.itertuples(index=False)]
+    widths = [
+        min(max_col_width, max([len(h)] + [len(r[i]) for r in rows]))
+        for i, h in enumerate(headers)
+    ]
+    fit = lambda text, w: (text if len(text) <= w else text[:w - 1] + "…").ljust(w)
+    lines = [" │ ".join(fit(h, w) for h, w in zip(headers, widths))]
+    lines.append("─┼─".join("─" * w for w in widths))
+    lines += [" │ ".join(fit(v, w) for v, w in zip(r, widths)) for r in rows]
+    return "\n".join(line.rstrip() for line in lines) + "\n"
+
+
+def excel_preview_table(excel_path: str):
+    """
+    Tabla para la pestaña Excel: desde la fila de encabezados detectada, sin filas ni columnas vacías.
+    Devuelve (DataFrame, texto informativo).
+    """
+    raw = pd.read_excel(excel_path, sheet_name=0, header=None)
+    raw = raw.dropna(how="all").dropna(axis=1, how="all")
+    row_idx, found = find_header_row(raw.reset_index(drop=True))
+    if row_idx is None:
+        raw.columns = [f"Col {i + 1}" for i in range(raw.shape[1])]
+        return raw, "No se detectaron las columnas RUT, Nombres, Apellidos y Correo"
+
+    raw = raw.reset_index(drop=True)
+    table = raw.iloc[row_idx + 1:].copy()
+    table.columns = [cell_text(h) or f"Col {i + 1}" for i, h in enumerate(raw.iloc[row_idx])]
+    rut_col, nombres_col = table.columns[found["rut"]], table.columns[found["nombres"]]
+    valid = table.iloc[:, found["rut"]].map(cell_text).ne("") & table.iloc[:, found["nombres"]].map(cell_text).ne("")
+    info = f"Encabezados detectados · participantes con {rut_col} y {nombres_col}: {int(valid.sum())}"
+    return table, info
 
 
 def normalize_excel_to_moodle_csv(
@@ -483,13 +535,14 @@ def normalize_excel_to_moodle_csv(
         ["username", "password", "firstname", "lastname", "email", profile_field_name, "type1", "course1"]
     ]
 
-    moodle.to_csv(csv_output_path, index=False, encoding="utf-8")
+    # utf-8-sig: con BOM para que Excel muestre bien las tildes (Moodle ignora el BOM)
+    moodle.to_csv(csv_output_path, index=False, encoding="utf-8-sig")
     return moodle
 
 
 def load_users_from_csv(path: str):
     users = []
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         if not reader.fieldnames:
             return users
@@ -642,8 +695,9 @@ class MoodleApp(ctk.CTk):
         main_frame = ctk.CTkFrame(self, corner_radius=0)
         main_frame.pack(fill="both", expand=True)
 
-        main_frame.grid_columnconfigure(0, weight=1, minsize=420)
-        main_frame.grid_columnconfigure(1, weight=2)
+        # uniform: el ancho de cada panel no cambia según el contenido de la pestaña abierta
+        main_frame.grid_columnconfigure(0, weight=2, minsize=420, uniform="panels")
+        main_frame.grid_columnconfigure(1, weight=3, uniform="panels")
         main_frame.grid_rowconfigure(2, weight=1)
 
         header = ctk.CTkFrame(main_frame)
@@ -851,11 +905,21 @@ class MoodleApp(ctk.CTk):
             row=3, column=2, padx=2, pady=2
         )
 
+        csv_btns = ctk.CTkFrame(files_frame, fg_color="transparent")
+        csv_btns.grid(row=4, column=1, columnspan=2, sticky="w", padx=4, pady=(4, 8))
         ctk.CTkButton(
-            files_frame,
+            csv_btns,
             text="Usar CSV Moodle como fuente de correos",
             command=self.use_moodle_csv_for_mail,
-        ).grid(row=4, column=1, sticky="w", padx=4, pady=(4, 8))
+        ).pack(side="left")
+        ctk.CTkButton(
+            csv_btns,
+            text="Ver en carpeta",
+            width=110,
+            command=self.show_csv_in_folder,
+            fg_color="gray35",
+            hover_color="gray25",
+        ).pack(side="left", padx=(6, 0))
 
         btns = ctk.CTkFrame(parent)
         btns.grid(row=1, column=0, sticky="ew", padx=8, pady=8)
@@ -955,6 +1019,7 @@ class MoodleApp(ctk.CTk):
 
         tabs = ctk.CTkTabview(parent)
         tabs.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
+        self.tabs = tabs
         parent.grid_rowconfigure(0, weight=2)
         parent.grid_rowconfigure(1, weight=1)
         parent.grid_columnconfigure(0, weight=1)
@@ -998,12 +1063,10 @@ class MoodleApp(ctk.CTk):
         )
         info_label.grid(row=1, column=0, sticky="w", padx=4, pady=(0, 2))
 
-        container = ctk.CTkScrollableFrame(parent)
-        container.grid(row=2, column=0, sticky="nsew", padx=4, pady=4)
-
-        tree = ctk.CTkTextbox(container, height=200)
-        tree.configure(font=("Consolas", 10))
-        tree.pack(fill="both", expand=True)
+        tree = ctk.CTkTextbox(parent, wrap="none", font=("Consolas", 11))
+        tree.grid(row=2, column=0, sticky="nsew", padx=4, pady=4)
+        tree.insert("1.0", "(sin datos)")
+        tree.configure(state="disabled")
 
         return tree, info_label
 
@@ -1085,22 +1148,10 @@ class MoodleApp(ctk.CTk):
             info_label.configure(text=f"{source_label}: 0 filas")
             return
 
-        cols = list(df.columns)
-        max_cols = min(len(cols), 8)
-        use_cols = cols[:max_cols]
-
-        header_line = " | ".join([str(c) for c in use_cols])
-        textbox.insert("end", header_line + "\n")
-        textbox.insert("end", "-" * len(header_line) + "\n")
-
-        max_rows = 50
-        for _, row in df.iloc[:max_rows].iterrows():
-            vals = [str(row[c]) for c in use_cols]
-            line = " | ".join(vals)
-            textbox.insert("end", line + "\n")
-
+        max_rows = 500
+        textbox.insert("end", format_table(df.iloc[:max_rows]))
         if len(df) > max_rows:
-            textbox.insert("end", f"... ({len(df) - max_rows} filas más)\n")
+            textbox.insert("end", f"\n... ({len(df) - max_rows} filas más)\n")
 
         textbox.configure(state="disabled")
 
@@ -1116,9 +1167,8 @@ class MoodleApp(ctk.CTk):
         )
         if path:
             self.var_excel_path.set(path)
-            out_path = os.path.splitext(path)[0] + "_moodle.csv"
-            if not self.var_csv_output_path.get():
-                self.var_csv_output_path.set(out_path)
+            # Siempre junto al Excel elegido, para no sobrescribir el CSV de otro curso
+            self.var_csv_output_path.set(os.path.splitext(path)[0] + "_moodle.csv")
             self.refresh_excel_preview()
 
     def browse_csv_output(self):
@@ -1140,11 +1190,19 @@ class MoodleApp(ctk.CTk):
             self.refresh_csv_mail_preview()
 
     def use_moodle_csv_for_mail(self):
-        if self.var_csv_output_path.get():
-            self.var_csv_mail_path.set(self.var_csv_output_path.get())
-            self.refresh_csv_mail_preview()
-        else:
-            messagebox.showwarning("Atención", "Primero genera el CSV Moodle.")
+        csv_out = self.var_csv_output_path.get().strip()
+        if not csv_out or not os.path.isfile(csv_out):
+            messagebox.showwarning("Atención", "Primero genera el CSV Moodle (botón «1) Generar CSV Moodle»).")
+            return
+        self.var_csv_mail_path.set(csv_out)
+        self.refresh_csv_mail_preview()
+
+    def show_csv_in_folder(self):
+        csv_out = self.var_csv_output_path.get().strip()
+        if not csv_out or not os.path.isfile(csv_out):
+            messagebox.showwarning("Atención", "Todavía no existe el CSV Moodle. Genera el CSV primero.")
+            return
+        subprocess.Popen(f'explorer /select,"{os.path.normpath(csv_out)}"')
 
     def refresh_excel_preview(self):
         path = self.var_excel_path.get().strip()
@@ -1154,15 +1212,16 @@ class MoodleApp(ctk.CTk):
             self.show_df_in_textbox(self.tree_excel, empty, self.info_excel, "Excel")
             return
         try:
-            df = pd.read_excel(path, sheet_name=0)
+            df, info = excel_preview_table(path)
             self.df_excel_raw = df
             self.show_df_in_textbox(
                 self.tree_excel,
                 df,
                 self.info_excel,
                 "Excel",
-                extra_info=os.path.basename(path),
+                extra_info=f"{os.path.basename(path)} · {info}",
             )
+            self.tabs.set("Excel")
             self.log(f"[Preview] Excel cargado: {path}")
         except Exception as e:
             self.log(f"[ERROR Excel preview] {e}")
@@ -1177,7 +1236,7 @@ class MoodleApp(ctk.CTk):
         if self.df_moodle is not None:
             self.log("[Preview] Vista Moodle actualizada.")
 
-    def refresh_csv_mail_preview(self):
+    def refresh_csv_mail_preview(self, show_tab=True):
         path = self.var_csv_mail_path.get().strip()
         if not path or not os.path.isfile(path):
             self.df_csv_mail = None
@@ -1186,11 +1245,15 @@ class MoodleApp(ctk.CTk):
             self.show_df_in_textbox(self.tree_csv, empty, self.info_csv, "CSV envío")
             return
         try:
-            df = pd.read_csv(path)
+            df = pd.read_csv(path, dtype=str, keep_default_na=False, encoding="utf-8-sig")
             self.df_csv_mail = df
             self.users_mail = load_users_from_csv(path)
             extra = f"Usuarios válidos para envío: {len(self.users_mail)}"
             self.show_df_in_textbox(self.tree_csv, df, self.info_csv, "CSV envío", extra_info=extra)
+            if show_tab:
+                # Un solo set() por acción: CTkTabview oculta las otras pestañas 100 ms después,
+                # y dos set() seguidos dejan en blanco la última pestaña elegida
+                self.tabs.set("CSV envío")
             self.log(f"[Preview] CSV envío cargado: {path}")
             self.update_email_preview_first_user()
         except Exception as e:
@@ -1314,9 +1377,21 @@ class MoodleApp(ctk.CTk):
                 password_year=password_year,
             )
             self.df_moodle = df_moodle
+            self.log(f"[OK] CSV generado ({len(df_moodle)} usuarios): {csv_out}")
+
+            # Deja listo el CSV recién generado como fuente de correos
+            mail_path = self.var_csv_mail_path.get().strip()
+            if not mail_path or os.path.normcase(os.path.abspath(mail_path)) == os.path.normcase(os.path.abspath(csv_out)):
+                self.var_csv_mail_path.set(csv_out)
+                self.refresh_csv_mail_preview(show_tab=False)
+
             self.refresh_moodle_preview()
-            self.log(f"[OK] CSV generado: {csv_out}")
-            messagebox.showinfo("Éxito", f"CSV Moodle generado en:\n{csv_out}")
+            self.tabs.set("Moodle CSV")
+            messagebox.showinfo(
+                "Éxito",
+                f"CSV Moodle generado con {len(df_moodle)} usuarios en:\n{csv_out}\n\n"
+                "Revisa la pestaña «Moodle CSV». Usa «Ver en carpeta» para ubicar el archivo.",
+            )
         except Exception as e:
             self.log(f"[ERROR] {e}")
             messagebox.showerror("Error", f"Ocurrió un error al generar el CSV:\n{e}")

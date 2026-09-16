@@ -36,13 +36,17 @@ Columnas obligatorias (no importan mayúsculas, tildes ni espacios sobrantes; la
 
 Si la celda de correo trae varios correos, se usa el primero. El RUT se copia tal como viene en la planilla (con o sin puntos).
 
-Con eso genera un CSV listo para importar en Moodle con:
+Con eso genera un CSV (UTF-8 con BOM, separado por comas) listo para importar en Moodle con:
 
 - `username` autogenerado desde **primer nombre + primer apellido + 2 letras del segundo apellido**, en minúsculas y sin tildes.
 - `password` generada por patrón configurable (por defecto `{username}{year}`, con el **año actual**).
 - `firstname`, `lastname`, `email`.
 - Campo de perfil para RUT (`profile_field_rut` por defecto).
 - Campos de matrícula: `type1` (por defecto `1`) y `course1` (ID del curso en Moodle).
+
+Al generar, la app abre la pestaña **Moodle CSV** con el resultado y deja ese CSV cargado como fuente de correos. El archivo se guarda junto al Excel con el sufijo `_moodle.csv` (o donde indiques con **Guardar como**); el botón **Ver en carpeta** lo muestra en el Explorador.
+
+> El CSV usa comas porque es lo que Moodle espera por defecto. Si lo abres en un Excel configurado en español (separador `;`), puede verse todo en una columna; la vista previa de la app no tiene ese problema.
 
 En [`ejemplos/planilla_inscripcion_prueba.xlsx`](ejemplos/planilla_inscripcion_prueba.xlsx) hay una planilla de prueba con datos ficticios (correos `@example.com`) que cubre casos borde: tildes, mayúsculas, un solo apellido, espacios sobrantes, dos correos en una celda, filas vacías y filas sin RUT.
 
@@ -68,7 +72,7 @@ En la barra superior, **Correo de prueba** + **Enviar prueba** manda un único c
 
 Pestañas de vista previa:
 
-- **Excel**
+- **Excel**: la tabla desde la fila de encabezados detectada, con el conteo de participantes válidos
 - **Moodle CSV**
 - **CSV envío**
 - **Correo (preview)**: el HTML se renderiza con Microsoft Edge o Google Chrome en modo headless y se muestra como imagen, igual a como se verá en el navegador. El botón **Abrir en navegador** abre la misma vista en una pestaña.
