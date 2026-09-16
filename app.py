@@ -30,7 +30,8 @@ import smtp_keys
 # =========================
 
 DEFAULT_COURSE_NAME = "Ingrese curso"
-DEFAULT_MOODLE_COURSE_FIELD = "Ingrese ID"
+# course1 = NOMBRE CORTO del curso en Moodle (la carga de usuarios no busca por número ID)
+DEFAULT_MOODLE_COURSE_FIELD = ""
 DEFAULT_MOODLE_TYPE1 = 1
 DEFAULT_PROFILE_FIELD_NAME = "profile_field_rut"
 
@@ -802,10 +803,16 @@ class MoodleApp(ctk.CTk):
             row=1, column=1, sticky="ew", padx=4, pady=2
         )
 
-        ctk.CTkLabel(course_frame, text="course1 (Moodle):").grid(row=2, column=0, sticky="w")
-        ctk.CTkEntry(course_frame, textvariable=self.var_course1, width=80).grid(
-            row=2, column=1, sticky="w", padx=4, pady=2
-        )
+        ctk.CTkLabel(course_frame, text="Nombre corto del curso (course1):").grid(row=2, column=0, sticky="w")
+        course1_row = ctk.CTkFrame(course_frame, fg_color="transparent")
+        course1_row.grid(row=2, column=1, sticky="ew", padx=4, pady=2)
+        ctk.CTkEntry(course1_row, textvariable=self.var_course1, width=160).pack(side="left")
+        ctk.CTkLabel(
+            course1_row,
+            text="Moodle › Configuración del curso › «Nombre corto» (no el número ID)",
+            font=("Segoe UI", 9),
+            text_color=("gray78", "gray78"),
+        ).pack(side="left", padx=4)
 
         ctk.CTkLabel(course_frame, text="type1:").grid(row=3, column=0, sticky="w")
         type_row = ctk.CTkFrame(course_frame, fg_color="transparent")
@@ -1358,8 +1365,17 @@ class MoodleApp(ctk.CTk):
             messagebox.showerror("Error", "Define una ruta de salida para el CSV.")
             return
 
+        course1 = self.var_course1.get().strip()
+        if not course1:
+            messagebox.showerror(
+                "Falta el nombre corto",
+                "Ingresa el NOMBRE CORTO del curso tal como aparece en Moodle "
+                "(Configuración del curso › Nombre corto).\n\n"
+                "Moodle matricula por nombre corto: si usas el número ID no encontrará el curso.",
+            )
+            return
+
         try:
-            course1 = self.var_course1.get().strip()
             type1 = int(self.var_type1.get().strip())
             profile_field = self.var_profile_field.get().strip() or DEFAULT_PROFILE_FIELD_NAME
 

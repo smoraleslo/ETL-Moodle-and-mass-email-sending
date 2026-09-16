@@ -42,7 +42,7 @@ Con eso genera un CSV (UTF-8 con BOM, separado por comas) listo para importar en
 - `password` generada por patrón configurable (por defecto `{username}{year}`, con el **año actual**).
 - `firstname`, `lastname`, `email`.
 - Campo de perfil para RUT (`profile_field_rut` por defecto).
-- Campos de matrícula: `type1` (por defecto `1`) y `course1` (ID del curso en Moodle).
+- Campos de matrícula: `type1` (por defecto `1`) y `course1`, que debe ser el **nombre corto** del curso en Moodle (Configuración del curso › Nombre corto). La carga de usuarios de Moodle matricula por nombre corto, no por número ID ni por el ID interno; la app no deja generar el CSV si este campo está vacío.
 
 Al generar, la app abre la pestaña **Moodle CSV** con el resultado y deja ese CSV cargado como fuente de correos. El archivo se guarda junto al Excel con el sufijo `_moodle.csv` (o donde indiques con **Guardar como**); el botón **Ver en carpeta** lo muestra en el Explorador.
 
